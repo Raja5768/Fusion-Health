@@ -41,6 +41,8 @@ xcodebuild \
 
 ## Backend URL
 
+The repository includes a deployable FastAPI backend under `backend/` and a Render Blueprint at `render.yaml`. See `backend/README.md` for hosted deployment instructions.
+
 Do not use `localhost` from the iPhone. Use your Mac or server LAN address instead:
 
 ```text

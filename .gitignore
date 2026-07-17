@@ -5,3 +5,9 @@ xcuserdata/
 # Local build output
 DerivedData/
 build/
+
+# Python backend
+__pycache__/
+*.pyc
+*.db
+.venv/
