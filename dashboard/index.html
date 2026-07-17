@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fusion Health</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <h1>Fusion Health</h1>
+          <p>Local wearable data, one schema, one daily decision.</p>
+        </div>
+        <button id="syncWhoop">Sync WHOOP</button>
+      </section>
+
+      <section class="auth-grid">
+        <form id="loginForm" class="panel">
+          <h2>Local Login</h2>
+          <input id="email" type="email" placeholder="email@example.com" required />
+          <input id="password" type="password" placeholder="password" minlength="8" required />
+          <div class="row">
+            <button type="submit">Login</button>
+            <button id="register" type="button">Register</button>
+          </div>
+        </form>
+        <div class="panel">
+          <h2>Connections</h2>
+          <button id="connectWhoop">Connect WHOOP</button>
+          <p id="connectionStatus">WHOOP ready. Apple Health import endpoint is available for a future iOS app.</p>
+        </div>
+        <div class="panel">
+          <h2>API Keys</h2>
+          <div class="row">
+            <input id="keyName" placeholder="Key name" />
+            <button id="generateKey">Generate</button>
+          </div>
+          <pre id="apiKeyOutput"></pre>
+        </div>
+      </section>
+
+      <section class="data-grid">
+        <article class="metric">
+          <span>Readiness</span>
+          <strong id="readiness">--</strong>
+        </article>
+        <article class="metric">
+          <span>Decision</span>
+          <strong id="decision">No briefing yet</strong>
+        </article>
+        <article class="metric">
+          <span>Sleep</span>
+          <strong id="sleep">--</strong>
+        </article>
+        <article class="metric">
+          <span>Recovery</span>
+          <strong id="recovery">--</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Latest Health Summary</h2>
+        <pre id="summaryOutput">Login, connect WHOOP, then sync.</pre>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
