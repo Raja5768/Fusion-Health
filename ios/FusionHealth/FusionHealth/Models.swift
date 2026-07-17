@@ -16,6 +16,15 @@ struct AppleHealthImportPayload: Codable {
         steps.reduce(0) { $0 + $1.count }
     }
 
+    var todaySteps: Int {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let today = formatter.string(from: Date())
+        return steps.first(where: { $0.date == today })?.count ?? 0
+    }
+
     var totalSleepHours: Double {
         sleep.reduce(0) { $0 + $1.sleepHours }
     }

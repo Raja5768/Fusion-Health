@@ -89,7 +89,7 @@ final class HealthKitManager: ObservableObject {
                 collection?.enumerateStatistics(from: start, to: end) { stats, _ in
                     let count = Int(stats.sumQuantity()?.doubleValue(for: .count()) ?? 0)
                     if count > 0 {
-                        rows.append(StepSample(date: Self.dayFormatter.string(from: stats.startDate), count: count))
+                        rows.append(StepSample(date: Self.dayString(stats.startDate), count: count))
                     }
                 }
                 continuation.resume(returning: rows)
@@ -113,8 +113,8 @@ final class HealthKitManager: ObservableObject {
                     .filter { $0.value == HKCategoryValueSleepAnalysis.asleepCore.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue }
                     .map {
                         SleepSample(
-                            start: Self.isoFormatter.string(from: $0.startDate),
-                            end: Self.isoFormatter.string(from: $0.endDate),
+                            start: Self.isoString($0.startDate),
+                            end: Self.isoString($0.endDate),
                             sleepHours: round($0.endDate.timeIntervalSince($0.startDate) / 36) / 100,
                             sleepScore: nil
                         )
@@ -140,7 +140,7 @@ final class HealthKitManager: ObservableObject {
                 let unit = HKUnit.count().unitDivided(by: .minute())
                 let rows = (samples as? [HKQuantitySample] ?? []).map {
                     HeartRateSample(
-                        sampledAt: Self.isoFormatter.string(from: $0.startDate),
+                        sampledAt: Self.isoString($0.startDate),
                         bpm: $0.quantity.doubleValue(for: unit),
                         context: "apple_health"
                     )
@@ -165,8 +165,8 @@ final class HealthKitManager: ObservableObject {
                 let rows = (samples as? [HKWorkout] ?? []).map {
                     WorkoutSample(
                         activityName: $0.workoutActivityType.displayName,
-                        start: Self.isoFormatter.string(from: $0.startDate),
-                        end: Self.isoFormatter.string(from: $0.endDate),
+                        start: Self.isoString($0.startDate),
+                        end: Self.isoString($0.endDate),
                         calories: $0.totalEnergyBurned?.doubleValue(for: .kilocalorie()),
                         averageHeartRate: nil
                     )
@@ -201,7 +201,7 @@ final class HealthKitManager: ObservableObject {
                 collection?.enumerateStatistics(from: start, to: end) { stats, _ in
                     let kcal = stats.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
                     if kcal > 0 {
-                        rows.append(CalorieSample(date: Self.dayFormatter.string(from: stats.startDate), calories: kcal))
+                        rows.append(CalorieSample(date: Self.dayString(stats.startDate), calories: kcal))
                     }
                 }
                 continuation.resume(returning: rows)
@@ -224,7 +224,7 @@ final class HealthKitManager: ObservableObject {
 
                 let rows = (samples as? [HKQuantitySample] ?? []).map {
                     BodyMetricSample(
-                        sampledAt: Self.isoFormatter.string(from: $0.startDate),
+                        sampledAt: Self.isoString($0.startDate),
                         type: "body_mass",
                         value: $0.quantity.doubleValue(for: .gramUnit(with: .kilo)),
                         unit: "kg"
@@ -236,19 +236,19 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    private static let isoFormatter: ISO8601DateFormatter = {
+    nonisolated private static func isoString(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 
-    private static let dayFormatter: DateFormatter = {
+    nonisolated private static func dayString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 }
 
 private extension HKWorkoutActivityType {

@@ -259,7 +259,7 @@ private struct SyncDashboard: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Latest Health Data").font(.headline)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    MetricTile(title: "Steps", value: lastPayload.totalSteps.formatted(), icon: "figure.walk", color: .blue)
+                    MetricTile(title: "Steps Today", value: lastPayload.todaySteps.formatted(), icon: "figure.walk", color: .blue)
                     MetricTile(title: "Sleep", value: String(format: "%.1f h", lastPayload.totalSleepHours), icon: "moon.zzz.fill", color: .indigo)
                     MetricTile(title: "Avg Heart Rate", value: lastPayload.averageHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "—", icon: "heart.fill", color: .pink)
                     MetricTile(title: "Workouts", value: lastPayload.workouts.count.formatted(), icon: "figure.run", color: .orange)
