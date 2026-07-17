@@ -65,6 +65,33 @@ final class HealthKitManager: ObservableObject {
         )
     }
 
+    func fetchTodaySteps() async throws -> Int {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return 0 }
+        let start = Calendar.current.startOfDay(for: Date())
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: Date(),
+            options: .strictStartDate
+        )
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let count = Int(statistics?.sumQuantity()?.doubleValue(for: .count()) ?? 0)
+                continuation.resume(returning: count)
+            }
+            store.execute(query)
+        }
+    }
+
     private func fetchDailySteps(start: Date, end: Date) async throws -> [StepSample] {
         guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return [] }
         let interval = DateComponents(day: 1)

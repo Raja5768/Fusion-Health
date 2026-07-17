@@ -16,6 +16,9 @@ struct ContentView: View {
     @State private var isSyncing = false
     @State private var isAuthorizing = false
     @State private var lastPayload: AppleHealthImportPayload?
+    @State private var todaySteps: Int?
+
+    private let fiveMinuteRefresh = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -27,6 +30,7 @@ struct ContentView: View {
                     isConfigured: isConfigured,
                     lastSyncDate: lastSyncDate,
                     lastPayload: lastPayload,
+                    todaySteps: todaySteps,
                     syncDays: syncDays,
                     syncAction: { Task { await sync() } }
                 )
@@ -59,6 +63,9 @@ struct ContentView: View {
             KeychainStore.set(newValue, forKey: "apiKey")
         }
         .onReceive(healthKit.$healthDataChangeID.dropFirst()) { _ in
+            Task { await refreshHealthData() }
+        }
+        .onReceive(fiveMinuteRefresh) { _ in
             Task { await refreshHealthData() }
         }
         .task {
@@ -106,6 +113,7 @@ struct ContentView: View {
             healthKit.startObservingHealthChanges()
             healthPermissionRequested = true
             let payload = try await healthKit.exportPayload(days: syncDays)
+            todaySteps = try await healthKit.fetchTodaySteps()
             lastPayload = payload
 
             let sampleCount = payload.sampleCount
@@ -143,6 +151,7 @@ struct ContentView: View {
 
         do {
             let payload = try await healthKit.exportPayload(days: syncDays)
+            todaySteps = try await healthKit.fetchTodaySteps()
             lastPayload = payload
             status = payload.sampleCount > 0
                 ? "Updated live from Apple Health"
@@ -162,6 +171,7 @@ private struct SyncDashboard: View {
     let isConfigured: Bool
     let lastSyncDate: Double
     let lastPayload: AppleHealthImportPayload?
+    let todaySteps: Int?
     let syncDays: Int
     let syncAction: () -> Void
 
@@ -259,7 +269,7 @@ private struct SyncDashboard: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Latest Health Data").font(.headline)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    MetricTile(title: "Steps Today", value: lastPayload.todaySteps.formatted(), icon: "figure.walk", color: .blue)
+                    MetricTile(title: "Steps Today", value: (todaySteps ?? lastPayload.todaySteps).formatted(), icon: "figure.walk", color: .blue)
                     MetricTile(title: "Sleep", value: String(format: "%.1f h", lastPayload.totalSleepHours), icon: "moon.zzz.fill", color: .indigo)
                     MetricTile(title: "Avg Heart Rate", value: lastPayload.averageHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "—", icon: "heart.fill", color: .pink)
                     MetricTile(title: "Workouts", value: lastPayload.workouts.count.formatted(), icon: "figure.run", color: .orange)
