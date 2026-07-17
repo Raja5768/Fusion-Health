@@ -17,12 +17,19 @@ struct AppleHealthImportPayload: Codable {
     }
 
     var todaySteps: Int {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        let today = formatter.string(from: Date())
-        return steps.first(where: { $0.date == today })?.count ?? 0
+        steps(on: Date())
+    }
+
+    var yesterdaySteps: Int {
+        steps(on: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+    }
+
+    var todayCalories: Double {
+        calories(on: Date())
+    }
+
+    var yesterdayCalories: Double {
+        calories(on: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
     }
 
     var totalSleepHours: Double {
@@ -40,6 +47,24 @@ struct AppleHealthImportPayload: Codable {
 
     var latestBodyMass: Double? {
         bodyMetrics.first(where: { $0.type == "body_mass" })?.value
+    }
+
+    private func steps(on date: Date) -> Int {
+        let day = Self.dayString(date)
+        return steps.first(where: { $0.date == day })?.count ?? 0
+    }
+
+    private func calories(on date: Date) -> Double {
+        let day = Self.dayString(date)
+        return calories.first(where: { $0.date == day })?.calories ?? 0
+    }
+
+    private static func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 }
 

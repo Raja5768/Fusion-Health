@@ -36,8 +36,14 @@ struct ContentView: View {
                     syncAction: { Task { await sync() } }
                 )
             }
-            .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
+            .tabItem { Label("Live", systemImage: "waveform.path.ecg") }
             .tag(0)
+
+            NavigationStack {
+                YesterdayDashboard(payload: lastPayload)
+            }
+            .tabItem { Label("Yesterday", systemImage: "clock.arrow.circlepath") }
+            .tag(3)
 
             NavigationStack {
                 APISettingsView(
@@ -178,6 +184,66 @@ struct ContentView: View {
     }
 }
 
+private struct YesterdayDashboard: View {
+    let payload: AppleHealthImportPayload?
+
+    private var yesterday: Date {
+        Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Yesterday")
+                        .font(.largeTitle.bold())
+                    Text(yesterday.formatted(date: .complete, time: .omitted))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let payload {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("Daily Activity", systemImage: "calendar.badge.clock")
+                            .font(.headline)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            MetricTile(
+                                title: "Steps",
+                                value: payload.yesterdaySteps.formatted(),
+                                icon: "figure.walk",
+                                color: .blue
+                            )
+                            MetricTile(
+                                title: "Active Energy",
+                                value: "\(Int(payload.yesterdayCalories.rounded()).formatted()) kcal",
+                                icon: "flame.fill",
+                                color: .red
+                            )
+                        }
+                    }
+                    .cardStyle()
+
+                    Text("This data refreshes from Apple Health whenever the app opens, HealthKit changes, or the five-minute live timer runs.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ContentUnavailableView(
+                        "Loading Health Data",
+                        systemImage: "heart.text.clipboard",
+                        description: Text("Keep Fusion Health open briefly while it reads yesterday’s activity.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                    .cardStyle()
+                }
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct SyncDashboard: View {
     let status: String
     let statusKind: StatusKind
@@ -287,7 +353,7 @@ private struct SyncDashboard: View {
                     MetricTile(title: "Sleep", value: String(format: "%.1f h", lastPayload.totalSleepHours), icon: "moon.zzz.fill", color: .indigo)
                     MetricTile(title: "Avg Heart Rate", value: lastPayload.averageHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "—", icon: "heart.fill", color: .pink)
                     MetricTile(title: "Workouts", value: lastPayload.workouts.count.formatted(), icon: "figure.run", color: .orange)
-                    MetricTile(title: "Active Energy", value: "\(Int(lastPayload.totalCalories.rounded()).formatted()) kcal", icon: "flame.fill", color: .red)
+                    MetricTile(title: "Active Energy", value: "\(Int(lastPayload.todayCalories.rounded()).formatted()) kcal", icon: "flame.fill", color: .red)
                     MetricTile(title: "Latest Weight", value: lastPayload.latestBodyMass.map { String(format: "%.1f kg", $0) } ?? "—", icon: "scalemass.fill", color: .green)
                 }
             }
