@@ -11,6 +11,27 @@ struct AppleHealthImportPayload: Codable {
     var sampleCount: Int {
         steps.count + sleep.count + heartRate.count + workouts.count + calories.count + bodyMetrics.count
     }
+
+    var totalSteps: Int {
+        steps.reduce(0) { $0 + $1.count }
+    }
+
+    var totalSleepHours: Double {
+        sleep.reduce(0) { $0 + $1.sleepHours }
+    }
+
+    var averageHeartRate: Double? {
+        guard !heartRate.isEmpty else { return nil }
+        return heartRate.reduce(0) { $0 + $1.bpm } / Double(heartRate.count)
+    }
+
+    var totalCalories: Double {
+        calories.reduce(0) { $0 + $1.calories }
+    }
+
+    var latestBodyMass: Double? {
+        bodyMetrics.first(where: { $0.type == "body_mass" })?.value
+    }
 }
 
 struct StepSample: Codable {

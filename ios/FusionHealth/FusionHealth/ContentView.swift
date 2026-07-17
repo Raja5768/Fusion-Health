@@ -227,12 +227,12 @@ private struct SyncDashboard: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Latest Health Data").font(.headline)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    MetricTile(title: "Steps", value: lastPayload.steps.count, icon: "figure.walk", color: .blue)
-                    MetricTile(title: "Sleep", value: lastPayload.sleep.count, icon: "moon.zzz.fill", color: .indigo)
-                    MetricTile(title: "Heart Rate", value: lastPayload.heartRate.count, icon: "heart.fill", color: .pink)
-                    MetricTile(title: "Workouts", value: lastPayload.workouts.count, icon: "figure.run", color: .orange)
-                    MetricTile(title: "Calories", value: lastPayload.calories.count, icon: "flame.fill", color: .red)
-                    MetricTile(title: "Body", value: lastPayload.bodyMetrics.count, icon: "scalemass.fill", color: .green)
+                    MetricTile(title: "Steps", value: lastPayload.totalSteps.formatted(), icon: "figure.walk", color: .blue)
+                    MetricTile(title: "Sleep", value: String(format: "%.1f h", lastPayload.totalSleepHours), icon: "moon.zzz.fill", color: .indigo)
+                    MetricTile(title: "Avg Heart Rate", value: lastPayload.averageHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "—", icon: "heart.fill", color: .pink)
+                    MetricTile(title: "Workouts", value: lastPayload.workouts.count.formatted(), icon: "figure.run", color: .orange)
+                    MetricTile(title: "Active Energy", value: "\(Int(lastPayload.totalCalories.rounded()).formatted()) kcal", icon: "flame.fill", color: .red)
+                    MetricTile(title: "Latest Weight", value: lastPayload.latestBodyMass.map { String(format: "%.1f kg", $0) } ?? "—", icon: "scalemass.fill", color: .green)
                 }
             }
         } else {
@@ -437,7 +437,7 @@ private struct PermissionsView: View {
 
 private struct MetricTile: View {
     let title: String
-    let value: Int
+    let value: String
     let icon: String
     let color: Color
 
@@ -448,7 +448,7 @@ private struct MetricTile: View {
                 .foregroundStyle(color)
                 .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
-                Text(value, format: .number).font(.headline)
+                Text(value).font(.headline)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
