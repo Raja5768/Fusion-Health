@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("backendURL") private var backendURL = ""
     @AppStorage("syncDays") private var syncDays = 7
     @AppStorage("lastSyncDate") private var lastSyncDate = 0.0
@@ -57,6 +58,19 @@ struct ContentView: View {
         .onChange(of: apiKey) { _, newValue in
             KeychainStore.set(newValue, forKey: "apiKey")
         }
+        .onReceive(healthKit.$healthDataChangeID.dropFirst()) { _ in
+            Task { await refreshHealthData() }
+        }
+        .task {
+            guard healthPermissionRequested else { return }
+            healthKit.startObservingHealthChanges()
+            await refreshHealthData()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active, healthPermissionRequested else { return }
+            healthKit.startObservingHealthChanges()
+            Task { await refreshHealthData() }
+        }
     }
 
     private var isConfigured: Bool {
@@ -70,6 +84,7 @@ struct ContentView: View {
 
         do {
             try await healthKit.requestAuthorization()
+            healthKit.startObservingHealthChanges()
             healthPermissionRequested = true
             status = "Health access request completed"
             statusKind = .success
@@ -88,6 +103,7 @@ struct ContentView: View {
 
         do {
             try await healthKit.requestAuthorization()
+            healthKit.startObservingHealthChanges()
             healthPermissionRequested = true
             let payload = try await healthKit.exportPayload(days: syncDays)
             lastPayload = payload
@@ -118,6 +134,22 @@ struct ContentView: View {
             } else {
                 status = error.localizedDescription
             }
+            statusKind = .error
+        }
+    }
+
+    private func refreshHealthData() async {
+        guard !isSyncing, healthPermissionRequested else { return }
+
+        do {
+            let payload = try await healthKit.exportPayload(days: syncDays)
+            lastPayload = payload
+            status = payload.sampleCount > 0
+                ? "Updated live from Apple Health"
+                : "No Health data found. Review Health access in Permissions."
+            statusKind = payload.sampleCount > 0 ? .success : .warning
+        } catch {
+            status = "Live update failed: \(error.localizedDescription)"
             statusKind = .error
         }
     }

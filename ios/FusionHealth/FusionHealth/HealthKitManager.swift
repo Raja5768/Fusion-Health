@@ -4,13 +4,11 @@ import HealthKit
 @MainActor
 final class HealthKitManager: ObservableObject {
     private let store = HKHealthStore()
+    private var observerQueries: [HKObserverQuery] = []
+    @Published private(set) var healthDataChangeID = UUID()
 
-    func requestAuthorization() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            throw FusionHealthError.healthKitUnavailable
-        }
-
-        let readTypes = Set([
+    private var readTypes: Set<HKObjectType> {
+        Set([
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
             HKObjectType.quantityType(forIdentifier: .heartRate)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
@@ -18,8 +16,32 @@ final class HealthKitManager: ObservableObject {
             HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
             HKObjectType.workoutType()
         ])
+    }
+
+    func requestAuthorization() async throws {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            throw FusionHealthError.healthKitUnavailable
+        }
 
         try await store.requestAuthorization(toShare: [], read: readTypes)
+    }
+
+    func startObservingHealthChanges() {
+        guard observerQueries.isEmpty else { return }
+
+        observerQueries = readTypes.compactMap { objectType in
+            guard let sampleType = objectType as? HKSampleType else { return nil }
+            let query = HKObserverQuery(sampleType: sampleType, predicate: nil) { [weak self] _, completion, error in
+                defer { completion() }
+                guard error == nil else { return }
+
+                Task { @MainActor [weak self] in
+                    self?.healthDataChangeID = UUID()
+                }
+            }
+            store.execute(query)
+            return query
+        }
     }
 
     func exportPayload(days: Int) async throws -> AppleHealthImportPayload {
