@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var status = "Ready to sync"
     @State private var statusKind = StatusKind.ready
     @State private var isSyncing = false
+    @State private var isRefreshing = false
     @State private var isAuthorizing = false
     @State private var lastPayload: AppleHealthImportPayload?
     @State private var todaySteps: Int?
@@ -69,14 +70,11 @@ struct ContentView: View {
             Task { await refreshHealthData() }
         }
         .task {
-            guard healthPermissionRequested else { return }
-            healthKit.startObservingHealthChanges()
-            await refreshHealthData()
+            await prepareHealthKit()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active, healthPermissionRequested else { return }
-            healthKit.startObservingHealthChanges()
-            Task { await refreshHealthData() }
+            guard newPhase == .active else { return }
+            Task { await prepareHealthKit() }
         }
     }
 
@@ -147,7 +145,9 @@ struct ContentView: View {
     }
 
     private func refreshHealthData() async {
-        guard !isSyncing, healthPermissionRequested else { return }
+        guard !isSyncing, !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
 
         do {
             let payload = try await healthKit.exportPayload(days: syncDays)
@@ -159,6 +159,20 @@ struct ContentView: View {
             statusKind = payload.sampleCount > 0 ? .success : .warning
         } catch {
             status = "Live update failed: \(error.localizedDescription)"
+            statusKind = .error
+        }
+    }
+
+    private func prepareHealthKit() async {
+        guard !isSyncing, !isRefreshing else { return }
+
+        do {
+            try await healthKit.requestAuthorization()
+            healthPermissionRequested = true
+            healthKit.startObservingHealthChanges()
+            await refreshHealthData()
+        } catch {
+            status = "HealthKit setup failed: \(error.localizedDescription)"
             statusKind = .error
         }
     }
