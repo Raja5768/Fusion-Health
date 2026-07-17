@@ -7,6 +7,8 @@ This FastAPI service receives Apple Health exports from the iOS app and stores e
 - `GET /health` — deployment health check.
 - `POST /api/v1/import/apple-health` — receive an iPhone HealthKit export.
 - `GET /api/v1/export/latest` — retrieve the latest normalized export.
+- `GET /api/v1/daily?limit=30` — retrieve stored daily steps and calories, newest first.
+- `GET /api/v1/daily/{YYYY-MM-DD}` — retrieve steps and calories for one date.
 - `GET /api/v1/summary/today` — retrieve a briefing-ready daily summary.
 - `GET /docs` — interactive OpenAPI documentation.
 
@@ -39,3 +41,14 @@ The repository-root `render.yaml` creates the API, a generated API key, and Post
 Do not commit the generated API key. Free Render PostgreSQL databases currently expire after 30 days; upgrade or attach a permanent PostgreSQL provider before relying on it for long-term history.
 
 Current hosted API: `https://fusion-health-api-qe6l.onrender.com`
+
+## Automatic daily activity
+
+The iOS app requests a background refresh shortly after local midnight. At the earliest time iOS permits, it uploads the completed previous calendar day's steps and active calories. It also retries whenever the app becomes active. Imports upsert `daily_activity` by date, so retries update the date instead of creating duplicate daily records.
+
+Example:
+
+```bash
+curl -H "X-API-Key: $FUSION_HEALTH_API_KEY" \
+  "https://fusion-health-api-qe6l.onrender.com/api/v1/daily?limit=7"
+```

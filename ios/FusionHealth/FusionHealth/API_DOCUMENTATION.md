@@ -155,6 +155,40 @@ Imports should be idempotent. The backend should derive a stable identity from t
 
 ## Daily summaries
 
+### Get stored daily steps and calories
+
+The iPhone automatically uploads the completed previous day after midnight. iOS chooses the exact background execution time; if it delays the task, Fusion Health retries when the app next opens. Each date is upserted, so a retry replaces that day's values.
+
+```http
+GET /api/v1/daily?limit=7
+X-API-Key: fh_your_key
+```
+
+Response:
+
+```json
+[
+  {
+    "date": "2026-07-16",
+    "steps": 8420,
+    "calories": 530.0,
+    "provider": "Apple Health",
+    "updated_at": "2026-07-17T05:05:00Z"
+  }
+]
+```
+
+`limit` accepts `1` through `365` and defaults to `30`.
+
+### Get one calendar date
+
+```http
+GET /api/v1/daily/2026-07-16
+X-API-Key: fh_your_key
+```
+
+This returns one object in the same format or `404` when that date has not been uploaded.
+
 ### Get today's summary
 
 ```http

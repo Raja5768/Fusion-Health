@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, DateTime, Integer, String, create_engine, select
+from sqlalchemy import JSON, Date, DateTime, Float, Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -29,6 +29,17 @@ class HealthImport(Base):
     provider: Mapped[str] = mapped_column(String(80), default="Apple Health")
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DailyActivity(Base):
+    __tablename__ = "daily_activity"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    activity_date: Mapped[date] = mapped_column(Date, unique=True, index=True)
+    steps: Mapped[int] = mapped_column(Integer, default=0)
+    calories: Mapped[float] = mapped_column(Float, default=0)
+    provider: Mapped[str] = mapped_column(String(80), default="Apple Health")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class HealthPayload(BaseModel):
@@ -77,12 +88,67 @@ def import_apple_health(
     imported_at = datetime.now(timezone.utc)
     values = payload.model_dump()
     session.add(HealthImport(payload=values, imported_at=imported_at))
+    daily_values: dict[str, dict[str, Any]] = {}
+    for item in values["steps"]:
+        day = item.get("date")
+        if day:
+            daily_values.setdefault(day, {"steps": 0, "calories": 0.0})["steps"] += int(item.get("count", 0))
+    for item in values["calories"]:
+        day = item.get("date")
+        if day:
+            daily_values.setdefault(day, {"steps": 0, "calories": 0.0})["calories"] += float(item.get("calories", 0))
+
+    for day, activity in daily_values.items():
+        try:
+            activity_date = date.fromisoformat(day)
+        except ValueError:
+            continue
+        record = session.scalar(select(DailyActivity).where(DailyActivity.activity_date == activity_date))
+        if record is None:
+            record = DailyActivity(activity_date=activity_date, updated_at=imported_at)
+            session.add(record)
+        record.steps = int(activity["steps"])
+        record.calories = round(float(activity["calories"]), 1)
+        record.updated_at = imported_at
     session.commit()
 
     return {
         "provider": "Apple Health",
         "imported": {name: len(records) for name, records in values.items()},
         "imported_at": imported_at.isoformat().replace("+00:00", "Z"),
+    }
+
+
+@app.get("/api/v1/daily", dependencies=[Depends(require_api_key)])
+def daily_activity_history(
+    limit: int = 30,
+    session: Session = Depends(db_session),
+) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 365))
+    records = session.scalars(
+        select(DailyActivity).order_by(DailyActivity.activity_date.desc()).limit(safe_limit)
+    ).all()
+    return [daily_activity_response(record) for record in records]
+
+
+@app.get("/api/v1/daily/{activity_date}", dependencies=[Depends(require_api_key)])
+def daily_activity_by_date(
+    activity_date: date,
+    session: Session = Depends(db_session),
+) -> dict[str, Any]:
+    record = session.scalar(select(DailyActivity).where(DailyActivity.activity_date == activity_date))
+    if record is None:
+        raise HTTPException(status_code=404, detail="No activity was found for that date.")
+    return daily_activity_response(record)
+
+
+def daily_activity_response(record: DailyActivity) -> dict[str, Any]:
+    return {
+        "date": record.activity_date,
+        "steps": record.steps,
+        "calories": round(record.calories, 1),
+        "provider": record.provider,
+        "updated_at": record.updated_at,
     }
 
 

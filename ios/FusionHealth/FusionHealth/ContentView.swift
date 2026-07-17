@@ -77,10 +77,12 @@ struct ContentView: View {
         }
         .task {
             await prepareHealthKit()
+            await DailyActivitySync.uploadYesterdayIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             Task { await prepareHealthKit() }
+            Task { await DailyActivitySync.uploadYesterdayIfNeeded() }
         }
     }
 

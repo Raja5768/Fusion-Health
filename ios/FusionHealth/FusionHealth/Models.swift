@@ -49,6 +49,18 @@ struct AppleHealthImportPayload: Codable {
         bodyMetrics.first(where: { $0.type == "body_mass" })?.value
     }
 
+    func activityOnly(for date: Date) -> AppleHealthImportPayload {
+        let day = Self.dayString(date)
+        return AppleHealthImportPayload(
+            steps: steps.filter { $0.date == day },
+            sleep: [],
+            heartRate: [],
+            workouts: [],
+            calories: calories.filter { $0.date == day },
+            bodyMetrics: []
+        )
+    }
+
     private func steps(on date: Date) -> Int {
         let day = Self.dayString(date)
         return steps.first(where: { $0.date == day })?.count ?? 0
