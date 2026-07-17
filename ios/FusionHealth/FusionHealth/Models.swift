@@ -56,6 +56,7 @@ struct AppleHealthImportResponse: Decodable {
 enum FusionHealthError: LocalizedError {
     case healthKitUnavailable
     case invalidBackendURL
+    case invalidAPIKey
     case invalidResponse
     case apiError(String)
 
@@ -64,7 +65,9 @@ enum FusionHealthError: LocalizedError {
         case .healthKitUnavailable:
             return "HealthKit is unavailable on this device."
         case .invalidBackendURL:
-            return "The backend URL is invalid."
+            return "The backend URL is invalid. Enter a complete HTTP or HTTPS URL."
+        case .invalidAPIKey:
+            return "Enter a valid Fusion Health API key."
         case .invalidResponse:
             return "Fusion Health returned an invalid response."
         case .apiError(let message):
