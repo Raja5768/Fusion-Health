@@ -1,1 +1,0 @@
-"""Wearable provider connectors."""
