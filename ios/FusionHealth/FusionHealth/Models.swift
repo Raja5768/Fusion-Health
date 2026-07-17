@@ -7,6 +7,10 @@ struct AppleHealthImportPayload: Codable {
     var workouts: [WorkoutSample]
     var calories: [CalorieSample]
     var bodyMetrics: [BodyMetricSample]
+
+    var sampleCount: Int {
+        steps.count + sleep.count + heartRate.count + workouts.count + calories.count + bodyMetrics.count
+    }
 }
 
 struct StepSample: Codable {

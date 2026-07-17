@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
-    @AppStorage("backendURL") private var backendURL = "http://192.168.1.10:8000"
+    @AppStorage("backendURL") private var backendURL = ""
     @AppStorage("syncDays") private var syncDays = 7
     @AppStorage("lastSyncDate") private var lastSyncDate = 0.0
     @AppStorage("healthPermissionRequested") private var healthPermissionRequested = false
@@ -80,30 +80,44 @@ struct ContentView: View {
     }
 
     private func sync() async {
-        guard isConfigured else {
-            status = "Add your backend URL and API key"
-            statusKind = .warning
-            return
-        }
-
         isSyncing = true
         status = "Reading Apple Health data…"
         statusKind = .working
+        var readSampleCount = 0
         defer { isSyncing = false }
 
         do {
             try await healthKit.requestAuthorization()
             healthPermissionRequested = true
             let payload = try await healthKit.exportPayload(days: syncDays)
+            lastPayload = payload
+
+            let sampleCount = payload.sampleCount
+            readSampleCount = sampleCount
+            guard sampleCount > 0 else {
+                status = "No Health data found. Review Health access in Permissions."
+                statusKind = .warning
+                return
+            }
+
+            guard isConfigured else {
+                status = "Read \(sampleCount) Health samples on this iPhone. Add API settings to upload."
+                statusKind = .success
+                return
+            }
+
             status = "Uploading securely…"
             let response = try await FusionHealthAPI(baseURL: backendURL, apiKey: apiKey)
                 .uploadAppleHealth(payload)
-            lastPayload = payload
             lastSyncDate = Date().timeIntervalSince1970
-            status = "Synced with \(response.provider)"
+            status = "Uploaded \(sampleCount) samples to \(response.provider)"
             statusKind = .success
         } catch {
-            status = error.localizedDescription
+            if readSampleCount > 0 {
+                status = "Read \(readSampleCount) Health samples, but upload failed: \(error.localizedDescription)"
+            } else {
+                status = error.localizedDescription
+            }
             statusKind = .error
         }
     }
@@ -165,8 +179,7 @@ private struct SyncDashboard: View {
                 .frame(height: 52)
                 .background(.white, in: RoundedRectangle(cornerRadius: 15))
             }
-            .disabled(isSyncing || !isConfigured)
-            .opacity(isConfigured ? 1 : 0.65)
+            .disabled(isSyncing)
         }
         .foregroundStyle(.white)
         .padding(22)
@@ -212,7 +225,7 @@ private struct SyncDashboard: View {
     private var metrics: some View {
         if let lastPayload {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Last upload").font(.headline)
+                Text("Latest Health Data").font(.headline)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     MetricTile(title: "Steps", value: lastPayload.steps.count, icon: "figure.walk", color: .blue)
                     MetricTile(title: "Sleep", value: lastPayload.sleep.count, icon: "moon.zzz.fill", color: .indigo)
