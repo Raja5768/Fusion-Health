@@ -3,7 +3,7 @@ import UIKit
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("backendURL") private var backendURL = ""
+    @AppStorage("backendURL") private var backendURL = "https://fusion-health-api-qe6l.onrender.com"
     @AppStorage("syncDays") private var syncDays = 7
     @AppStorage("lastSyncDate") private var lastSyncDate = 0.0
     @AppStorage("healthPermissionRequested") private var healthPermissionRequested = false

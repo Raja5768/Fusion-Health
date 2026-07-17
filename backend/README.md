@@ -37,3 +37,5 @@ The repository-root `render.yaml` creates the API, a generated API key, and Post
 6. In the iPhone app's **API** tab, enter the service URL and copied key.
 
 Do not commit the generated API key. Free Render PostgreSQL databases currently expire after 30 days; upgrade or attach a permanent PostgreSQL provider before relying on it for long-term history.
+
+Current hosted API: `https://fusion-health-api-qe6l.onrender.com`
