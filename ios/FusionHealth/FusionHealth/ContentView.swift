@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var status = "Displaying Apple Health data only"
     @State private var statusKind = StatusKind.ready
     @State private var isRefreshing = false
+    @State private var isUploadingYesterday = false
+    @State private var yesterdayUploadStatus: String?
     @State private var isAuthorizing = false
     @State private var lastPayload: AppleHealthImportPayload?
     @State private var todaySteps: Int?
@@ -30,15 +32,19 @@ struct ContentView: View {
                     lastDailyUpload: lastDailyUpload,
                     lastDailyUploadTime: lastDailyUploadTime,
                     lastPayload: lastPayload,
-                    todaySteps: todaySteps,
-                    refreshAction: { Task { await refreshHealthData() } }
+                    todaySteps: todaySteps
                 )
             }
             .tabItem { Label("Live", systemImage: "waveform.path.ecg") }
             .tag(0)
 
             NavigationStack {
-                YesterdayDashboard(payload: lastPayload)
+                YesterdayDashboard(
+                    payload: lastPayload,
+                    isUploading: isUploadingYesterday,
+                    uploadStatus: yesterdayUploadStatus,
+                    syncAction: { Task { await syncYesterdayNow() } }
+                )
             }
             .tabItem { Label("Yesterday", systemImage: "clock.arrow.circlepath") }
             .tag(3)
@@ -118,6 +124,20 @@ struct ContentView: View {
         }
     }
 
+    private func syncYesterdayNow() async {
+        guard !isUploadingYesterday else { return }
+        isUploadingYesterday = true
+        yesterdayUploadStatus = "Uploading yesterday's activity…"
+        defer { isUploadingYesterday = false }
+
+        let succeeded = await DailyActivitySync.uploadYesterdayIfNeeded(force: true)
+        if succeeded {
+            yesterdayUploadStatus = "Yesterday's steps and active calories were uploaded."
+        } else {
+            yesterdayUploadStatus = "Upload failed. Check Health permissions and API settings."
+        }
+    }
+
     private func prepareHealthKit() async {
         guard !isRefreshing else { return }
 
@@ -135,6 +155,9 @@ struct ContentView: View {
 
 private struct YesterdayDashboard: View {
     let payload: AppleHealthImportPayload?
+    let isUploading: Bool
+    let uploadStatus: String?
+    let syncAction: () -> Void
 
     private var yesterday: Date {
         Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
@@ -171,7 +194,30 @@ private struct YesterdayDashboard: View {
                     }
                     .cardStyle()
 
-                    Text("This data refreshes from Apple Health whenever the app opens, HealthKit changes, or the five-minute live timer runs.")
+                    Button(action: syncAction) {
+                        HStack {
+                            if isUploading {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "arrow.up.circle.fill")
+                            }
+                            Text(isUploading ? "Syncing yesterday…" : "Sync yesterday now")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                        .padding()
+                        .foregroundStyle(.white)
+                        .background(.teal, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .disabled(isUploading)
+
+                    if let uploadStatus {
+                        Text(uploadStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("Yesterday uploads automatically after midnight. Use the button only when you want to retry immediately.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
@@ -201,7 +247,6 @@ private struct SyncDashboard: View {
     let lastDailyUploadTime: Double
     let lastPayload: AppleHealthImportPayload?
     let todaySteps: Int?
-    let refreshAction: () -> Void
 
     var body: some View {
         ScrollView {
@@ -232,24 +277,9 @@ private struct SyncDashboard: View {
                     .symbolRenderingMode(.hierarchical)
             }
 
-            Button(action: refreshAction) {
-                HStack {
-                    if isRefreshing {
-                        ProgressView().tint(.teal)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    Text(isRefreshing ? "Refreshing…" : "Refresh display")
-                        .fontWeight(.semibold)
-                    Spacer()
-                    if !isRefreshing { Image(systemName: "arrow.right") }
-                }
-                .foregroundStyle(.teal)
-                .padding(.horizontal, 16)
-                .frame(height: 52)
-                .background(.white, in: RoundedRectangle(cornerRadius: 15))
-            }
-            .disabled(isRefreshing)
+            Label("Live view refreshes automatically", systemImage: "bolt.heart.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
         }
         .foregroundStyle(.white)
         .padding(22)

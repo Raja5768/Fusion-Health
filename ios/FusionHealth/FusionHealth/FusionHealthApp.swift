@@ -49,7 +49,7 @@ enum DailyActivitySync {
 
     @MainActor
     @discardableResult
-    static func uploadYesterdayIfNeeded() async -> Bool {
+    static func uploadYesterdayIfNeeded(force: Bool = false) async -> Bool {
         let defaults = UserDefaults.standard
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
         let dateFormatter = DateFormatter()
@@ -60,7 +60,7 @@ enum DailyActivitySync {
 
         let lastDay = defaults.string(forKey: lastUploadKey)
         let lastUploadTime = defaults.double(forKey: lastUploadTimeKey)
-        if lastDay == day, Date().timeIntervalSince1970 - lastUploadTime < 21_600 {
+        if !force, lastDay == day, Date().timeIntervalSince1970 - lastUploadTime < 21_600 {
             return true
         }
         let backendURL = defaults.string(forKey: "backendURL") ?? "https://fusion-health-api-qe6l.onrender.com"
