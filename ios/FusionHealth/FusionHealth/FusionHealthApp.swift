@@ -70,8 +70,8 @@ enum DailyActivitySync {
         do {
             let healthKit = HealthKitManager()
             try await healthKit.requestAuthorization()
-            let payload = try await healthKit.exportPayload(days: 2).activityOnly(for: yesterday)
-            guard !payload.steps.isEmpty || !payload.calories.isEmpty else { return false }
+            let payload = try await healthKit.fetchDailyActivity(for: yesterday)
+            guard payload.totalSteps > 0 || payload.totalCalories > 0 else { return false }
             _ = try await FusionHealthAPI(baseURL: backendURL, apiKey: apiKey).uploadAppleHealth(payload)
             defaults.set(day, forKey: lastUploadKey)
             defaults.set(Date().timeIntervalSince1970, forKey: lastUploadTimeKey)

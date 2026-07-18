@@ -92,6 +92,67 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
+    func fetchDailyActivity(for date: Date) async throws -> AppleHealthImportPayload {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
+            return AppleHealthImportPayload(steps: [], sleep: [], heartRate: [], workouts: [], calories: [], bodyMetrics: [])
+        }
+
+        async let steps = fetchCumulativeQuantity(
+            identifier: .stepCount,
+            unit: .count(),
+            start: start,
+            end: end
+        )
+        async let calories = fetchCumulativeQuantity(
+            identifier: .activeEnergyBurned,
+            unit: .kilocalorie(),
+            start: start,
+            end: end
+        )
+
+        let (stepTotal, calorieTotal) = try await (steps, calories)
+        let day = Self.dayString(start)
+        return AppleHealthImportPayload(
+            steps: [StepSample(date: day, count: Int(stepTotal.rounded(.down)))],
+            sleep: [],
+            heartRate: [],
+            workouts: [],
+            calories: [CalorieSample(date: day, calories: calorieTotal)],
+            bodyMetrics: []
+        )
+    }
+
+    private func fetchCumulativeQuantity(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        start: Date,
+        end: Date
+    ) async throws -> Double {
+        guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { return 0 }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: statistics?.sumQuantity()?.doubleValue(for: unit) ?? 0)
+            }
+            store.execute(query)
+        }
+    }
+
     private func fetchDailySteps(start: Date, end: Date) async throws -> [StepSample] {
         guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return [] }
         let interval = DateComponents(day: 1)

@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var yesterdayUploadStatus: String?
     @State private var isAuthorizing = false
     @State private var lastPayload: AppleHealthImportPayload?
+    @State private var yesterdayPayload: AppleHealthImportPayload?
     @State private var todaySteps: Int?
 
     private let fiveMinuteRefresh = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
@@ -35,7 +36,7 @@ struct ContentView: View {
 
             NavigationStack {
                 YesterdayDashboard(
-                    payload: lastPayload,
+                    payload: yesterdayPayload,
                     isUploading: isUploadingYesterday,
                     uploadStatus: yesterdayUploadStatus,
                     syncAction: { Task { await syncYesterdayNow() } }
@@ -106,9 +107,14 @@ struct ContentView: View {
         defer { isRefreshing = false }
 
         do {
-            let payload = try await healthKit.exportPayload(days: 2)
-            todaySteps = try await healthKit.fetchTodaySteps()
+            let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+            async let livePayload = healthKit.exportPayload(days: 2)
+            async let currentSteps = healthKit.fetchTodaySteps()
+            async let completedDay = healthKit.fetchDailyActivity(for: yesterday)
+            let (payload, steps, dailyPayload) = try await (livePayload, currentSteps, completedDay)
+            todaySteps = steps
             lastPayload = payload
+            yesterdayPayload = dailyPayload
             status = payload.sampleCount > 0
                 ? "Updated display from Apple Health — nothing uploaded"
                 : "No Health data found. Review Health access in Permissions."
@@ -128,6 +134,8 @@ struct ContentView: View {
         let succeeded = await DailyActivitySync.uploadYesterdayIfNeeded(force: true)
         if succeeded {
             yesterdayUploadStatus = "Yesterday's steps and active calories were uploaded."
+            let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+            yesterdayPayload = try? await healthKit.fetchDailyActivity(for: yesterday)
         } else {
             yesterdayUploadStatus = "Upload failed. Check Health permissions and API settings."
         }

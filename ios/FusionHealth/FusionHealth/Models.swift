@@ -63,12 +63,12 @@ struct AppleHealthImportPayload: Codable {
 
     private func steps(on date: Date) -> Int {
         let day = Self.dayString(date)
-        return steps.first(where: { $0.date == day })?.count ?? 0
+        return steps.filter { $0.date == day }.reduce(0) { $0 + $1.count }
     }
 
     private func calories(on date: Date) -> Double {
         let day = Self.dayString(date)
-        return calories.first(where: { $0.date == day })?.calories ?? 0
+        return calories.filter { $0.date == day }.reduce(0) { $0 + $1.calories }
     }
 
     private static func dayString(_ date: Date) -> String {
