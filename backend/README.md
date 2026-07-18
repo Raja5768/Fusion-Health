@@ -1,6 +1,6 @@
 # Fusion Health Backend
 
-This FastAPI service receives Apple Health exports from the iOS app and stores each authenticated import in PostgreSQL.
+This FastAPI service receives Apple Health activity from the iOS app. Automatic uploads keep one compact PostgreSQL row per calendar date containing only steps and active calories. Extended manual imports remain supported for compatibility but are not sent by the current app.
 
 ## Endpoints
 
@@ -44,7 +44,7 @@ Current hosted API: `https://fusion-health-api-qe6l.onrender.com`
 
 ## Automatic daily activity
 
-The iOS app requests a background refresh shortly after local midnight. At the earliest time iOS permits, it uploads the completed previous calendar day's steps and active calories. It also retries whenever the app becomes active. Imports upsert `daily_activity` by date, so retries update the date instead of creating duplicate daily records.
+The iOS app requests a background refresh shortly after local midnight. At the earliest time iOS permits, it uploads the completed previous calendar day's steps and active calories. It also retries whenever the app becomes active. Imports upsert `daily_activity` by date, so retries update the date instead of creating duplicate daily records. Today's live HealthKit data is display-only and is never uploaded.
 
 Example:
 

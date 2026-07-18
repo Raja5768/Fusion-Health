@@ -157,7 +157,7 @@ Imports should be idempotent. The backend should derive a stable identity from t
 
 ### Get stored daily steps and calories
 
-The iPhone automatically uploads the completed previous day after midnight. iOS chooses the exact background execution time; if it delays the task, Fusion Health retries when the app next opens. Each date is upserted, so a retry replaces that day's values.
+The iPhone automatically uploads only the completed previous day's steps and active calories after midnight. Today's live data is displayed on-device and is never uploaded. iOS chooses the exact background execution time; if it delays the task, Fusion Health retries when the app next opens. Each date is upserted, so a retry replaces that day's values and PostgreSQL retains one compact row per date.
 
 ```http
 GET /api/v1/daily?limit=7

@@ -87,7 +87,11 @@ def import_apple_health(
 ) -> dict[str, Any]:
     imported_at = datetime.now(timezone.utc)
     values = payload.model_dump()
-    session.add(HealthImport(payload=values, imported_at=imported_at))
+    has_extended_data = any(
+        values[name] for name in ("sleep", "heart_rate", "workouts", "body_metrics")
+    )
+    if has_extended_data:
+        session.add(HealthImport(payload=values, imported_at=imported_at))
     daily_values: dict[str, dict[str, Any]] = {}
     for item in values["steps"]:
         day = item.get("date")

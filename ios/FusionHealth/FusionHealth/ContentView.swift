@@ -4,16 +4,15 @@ import UIKit
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("backendURL") private var backendURL = "https://fusion-health-api-qe6l.onrender.com"
-    @AppStorage("syncDays") private var syncDays = 7
-    @AppStorage("lastSyncDate") private var lastSyncDate = 0.0
+    @AppStorage("lastDailyActivityUpload") private var lastDailyUpload = ""
+    @AppStorage("lastDailyActivityUploadTime") private var lastDailyUploadTime = 0.0
     @AppStorage("healthPermissionRequested") private var healthPermissionRequested = false
     @AppStorage("selectedTab") private var selectedTab = 0
 
     @StateObject private var healthKit = HealthKitManager()
     @State private var apiKey = KeychainStore.string(forKey: "apiKey")
-    @State private var status = "Ready to sync"
+    @State private var status = "Displaying Apple Health data only"
     @State private var statusKind = StatusKind.ready
-    @State private var isSyncing = false
     @State private var isRefreshing = false
     @State private var isAuthorizing = false
     @State private var lastPayload: AppleHealthImportPayload?
@@ -27,13 +26,12 @@ struct ContentView: View {
                 SyncDashboard(
                     status: status,
                     statusKind: statusKind,
-                    isSyncing: isSyncing,
-                    isConfigured: isConfigured,
-                    lastSyncDate: lastSyncDate,
+                    isRefreshing: isRefreshing,
+                    lastDailyUpload: lastDailyUpload,
+                    lastDailyUploadTime: lastDailyUploadTime,
                     lastPayload: lastPayload,
                     todaySteps: todaySteps,
-                    syncDays: syncDays,
-                    syncAction: { Task { await sync() } }
+                    refreshAction: { Task { await refreshHealthData() } }
                 )
             }
             .tabItem { Label("Live", systemImage: "waveform.path.ecg") }
@@ -48,8 +46,7 @@ struct ContentView: View {
             NavigationStack {
                 APISettingsView(
                     backendURL: $backendURL,
-                    apiKey: $apiKey,
-                    syncDays: $syncDays
+                    apiKey: $apiKey
                 )
             }
             .tabItem { Label("API", systemImage: "server.rack") }
@@ -86,11 +83,6 @@ struct ContentView: View {
         }
     }
 
-    private var isConfigured: Bool {
-        !backendURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private func authorize() async {
         isAuthorizing = true
         defer { isAuthorizing = false }
@@ -107,62 +99,17 @@ struct ContentView: View {
         }
     }
 
-    private func sync() async {
-        isSyncing = true
-        status = "Reading Apple Health data…"
-        statusKind = .working
-        var readSampleCount = 0
-        defer { isSyncing = false }
-
-        do {
-            try await healthKit.requestAuthorization()
-            healthKit.startObservingHealthChanges()
-            healthPermissionRequested = true
-            let payload = try await healthKit.exportPayload(days: syncDays)
-            todaySteps = try await healthKit.fetchTodaySteps()
-            lastPayload = payload
-
-            let sampleCount = payload.sampleCount
-            readSampleCount = sampleCount
-            guard sampleCount > 0 else {
-                status = "No Health data found. Review Health access in Permissions."
-                statusKind = .warning
-                return
-            }
-
-            guard isConfigured else {
-                status = "Read \(sampleCount) Health samples on this iPhone. Add API settings to upload."
-                statusKind = .success
-                return
-            }
-
-            status = "Uploading securely…"
-            let response = try await FusionHealthAPI(baseURL: backendURL, apiKey: apiKey)
-                .uploadAppleHealth(payload)
-            lastSyncDate = Date().timeIntervalSince1970
-            status = "Uploaded \(sampleCount) samples to \(response.provider)"
-            statusKind = .success
-        } catch {
-            if readSampleCount > 0 {
-                status = "Read \(readSampleCount) Health samples, but upload failed: \(error.localizedDescription)"
-            } else {
-                status = error.localizedDescription
-            }
-            statusKind = .error
-        }
-    }
-
     private func refreshHealthData() async {
-        guard !isSyncing, !isRefreshing else { return }
+        guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
         do {
-            let payload = try await healthKit.exportPayload(days: syncDays)
+            let payload = try await healthKit.exportPayload(days: 2)
             todaySteps = try await healthKit.fetchTodaySteps()
             lastPayload = payload
             status = payload.sampleCount > 0
-                ? "Updated live from Apple Health"
+                ? "Updated display from Apple Health — nothing uploaded"
                 : "No Health data found. Review Health access in Permissions."
             statusKind = payload.sampleCount > 0 ? .success : .warning
         } catch {
@@ -172,7 +119,7 @@ struct ContentView: View {
     }
 
     private func prepareHealthKit() async {
-        guard !isSyncing, !isRefreshing else { return }
+        guard !isRefreshing else { return }
 
         do {
             try await healthKit.requestAuthorization()
@@ -249,13 +196,12 @@ private struct YesterdayDashboard: View {
 private struct SyncDashboard: View {
     let status: String
     let statusKind: StatusKind
-    let isSyncing: Bool
-    let isConfigured: Bool
-    let lastSyncDate: Double
+    let isRefreshing: Bool
+    let lastDailyUpload: String
+    let lastDailyUploadTime: Double
     let lastPayload: AppleHealthImportPayload?
     let todaySteps: Int?
-    let syncDays: Int
-    let syncAction: () -> Void
+    let refreshAction: () -> Void
 
     var body: some View {
         ScrollView {
@@ -274,9 +220,9 @@ private struct SyncDashboard: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Apple Health Sync")
+                    Text("Apple Health Live View")
                         .font(.title2.bold())
-                    Text("Keep your health timeline up to date with one private, on-device sync.")
+                    Text("Today's data stays on your iPhone and is never uploaded.")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
                 }
@@ -286,24 +232,24 @@ private struct SyncDashboard: View {
                     .symbolRenderingMode(.hierarchical)
             }
 
-            Button(action: syncAction) {
+            Button(action: refreshAction) {
                 HStack {
-                    if isSyncing {
+                    if isRefreshing {
                         ProgressView().tint(.teal)
                     } else {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
-                    Text(isSyncing ? "Syncing…" : "Sync last \(syncDays) days")
+                    Text(isRefreshing ? "Refreshing…" : "Refresh display")
                         .fontWeight(.semibold)
                     Spacer()
-                    if !isSyncing { Image(systemName: "arrow.right") }
+                    if !isRefreshing { Image(systemName: "arrow.right") }
                 }
                 .foregroundStyle(.teal)
                 .padding(.horizontal, 16)
                 .frame(height: 52)
                 .background(.white, in: RoundedRectangle(cornerRadius: 15))
             }
-            .disabled(isSyncing)
+            .disabled(isRefreshing)
         }
         .foregroundStyle(.white)
         .padding(22)
@@ -320,21 +266,21 @@ private struct SyncDashboard: View {
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Sync Status", systemImage: "waveform.path.ecg")
+            Label("Automatic Daily Upload", systemImage: "calendar.badge.checkmark")
                 .font(.headline)
             HStack(spacing: 12) {
                 Image(systemName: statusKind.icon)
                     .font(.title2)
                     .foregroundStyle(statusKind.color)
-                    .symbolEffect(.pulse, isActive: isSyncing)
+                    .symbolEffect(.pulse, isActive: isRefreshing)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(status).fontWeight(.semibold)
-                    if lastSyncDate > 0 {
-                        Text("Last synced \(Date(timeIntervalSince1970: lastSyncDate), style: .relative)")
+                    if lastDailyUploadTime > 0 {
+                        Text("\(lastDailyUpload) uploaded \(Date(timeIntervalSince1970: lastDailyUploadTime), style: .relative)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text(isConfigured ? "Your first sync is ready" : "Complete API settings to begin")
+                        Text("Yesterday uploads automatically after midnight when API settings are complete")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -361,9 +307,9 @@ private struct SyncDashboard: View {
             }
         } else {
             ContentUnavailableView(
-                "No sync history",
+                "Loading live data",
                 systemImage: "chart.xyaxis.line",
-                description: Text("Your latest upload summary will appear here.")
+                description: Text("Apple Health data will appear here and remain on this iPhone.")
             )
             .frame(maxWidth: .infinity)
             .padding(.vertical, 22)
@@ -375,7 +321,6 @@ private struct SyncDashboard: View {
 private struct APISettingsView: View {
     @Binding var backendURL: String
     @Binding var apiKey: String
-    @Binding var syncDays: Int
     @State private var revealAPIKey = false
 
     var body: some View {
@@ -431,14 +376,11 @@ private struct APISettingsView: View {
                 }
             }
 
-            Section {
-                Stepper(value: $syncDays, in: 1...30) {
-                    LabeledContent("Health history", value: "\(syncDays) days")
-                }
-            } header: {
-                Text("Sync Range")
-            } footer: {
-                Text("Larger ranges may take longer and upload more samples.")
+            Section("Automatic Upload") {
+                Label("Only yesterday's steps and active calories are uploaded after midnight.", systemImage: "calendar.badge.clock")
+                Text("Live data is display-only. PostgreSQL stores one compact row per calendar day.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("API Settings")
