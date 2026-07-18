@@ -46,6 +46,8 @@ Current hosted API: `https://fusion-health-api-qe6l.onrender.com`
 
 The iOS app requests a background refresh shortly after local midnight. At the earliest time iOS permits, it uploads the completed previous calendar day's steps and active calories. It also retries whenever the app becomes active. Imports upsert `daily_activity` by date, so retries update the date instead of creating duplicate daily records. Today's live HealthKit data is display-only and is never uploaded.
 
+Each successful import also deletes daily activity and legacy import records older than seven days. This keeps PostgreSQL limited to a rolling seven-day health history without requiring a separate scheduled database job.
+
 Example:
 
 ```bash

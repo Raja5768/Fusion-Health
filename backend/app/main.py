@@ -1,11 +1,11 @@
 import os
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, Date, DateTime, Float, Integer, String, create_engine, select
+from sqlalchemy import JSON, Date, DateTime, Float, Integer, String, create_engine, delete, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -75,6 +75,14 @@ def db_session():
         session.close()
 
 
+def prune_expired_health_data(session: Session, imported_at: datetime) -> None:
+    """Keep only the most recent seven completed calendar days of health data."""
+    import_cutoff = imported_at - timedelta(days=7)
+    activity_cutoff = imported_at.date() - timedelta(days=7)
+    session.execute(delete(HealthImport).where(HealthImport.imported_at < import_cutoff))
+    session.execute(delete(DailyActivity).where(DailyActivity.activity_date < activity_cutoff))
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -114,6 +122,7 @@ def import_apple_health(
         record.steps = int(activity["steps"])
         record.calories = round(float(activity["calories"]), 1)
         record.updated_at = imported_at
+    prune_expired_health_data(session, imported_at)
     session.commit()
 
     return {
