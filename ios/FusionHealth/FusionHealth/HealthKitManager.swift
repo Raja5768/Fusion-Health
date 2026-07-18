@@ -4,13 +4,11 @@ import HealthKit
 @MainActor
 final class HealthKitManager: ObservableObject {
     private let store = HKHealthStore()
+    private var observerQueries: [HKObserverQuery] = []
+    @Published private(set) var healthDataChangeID = UUID()
 
-    func requestAuthorization() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            throw FusionHealthError.healthKitUnavailable
-        }
-
-        let readTypes = Set([
+    private var readTypes: Set<HKObjectType> {
+        Set([
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
             HKObjectType.quantityType(forIdentifier: .heartRate)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
@@ -18,8 +16,32 @@ final class HealthKitManager: ObservableObject {
             HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
             HKObjectType.workoutType()
         ])
+    }
+
+    func requestAuthorization() async throws {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            throw FusionHealthError.healthKitUnavailable
+        }
 
         try await store.requestAuthorization(toShare: [], read: readTypes)
+    }
+
+    func startObservingHealthChanges() {
+        guard observerQueries.isEmpty else { return }
+
+        observerQueries = readTypes.compactMap { objectType in
+            guard let sampleType = objectType as? HKSampleType else { return nil }
+            let query = HKObserverQuery(sampleType: sampleType, predicate: nil) { [weak self] _, completion, error in
+                defer { completion() }
+                guard error == nil else { return }
+
+                Task { @MainActor [weak self] in
+                    self?.healthDataChangeID = UUID()
+                }
+            }
+            store.execute(query)
+            return query
+        }
     }
 
     func exportPayload(days: Int) async throws -> AppleHealthImportPayload {
@@ -41,6 +63,94 @@ final class HealthKitManager: ObservableObject {
             calories: calories,
             bodyMetrics: bodyMetrics
         )
+    }
+
+    func fetchTodaySteps() async throws -> Int {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return 0 }
+        let start = Calendar.current.startOfDay(for: Date())
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: Date(),
+            options: .strictStartDate
+        )
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let count = Int(statistics?.sumQuantity()?.doubleValue(for: .count()) ?? 0)
+                continuation.resume(returning: count)
+            }
+            store.execute(query)
+        }
+    }
+
+    func fetchDailyActivity(for date: Date) async throws -> AppleHealthImportPayload {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
+            return AppleHealthImportPayload(steps: [], sleep: [], heartRate: [], workouts: [], calories: [], bodyMetrics: [])
+        }
+
+        async let steps = fetchCumulativeQuantity(
+            identifier: .stepCount,
+            unit: .count(),
+            start: start,
+            end: end
+        )
+        async let calories = fetchCumulativeQuantity(
+            identifier: .activeEnergyBurned,
+            unit: .kilocalorie(),
+            start: start,
+            end: end
+        )
+
+        let (stepTotal, calorieTotal) = try await (steps, calories)
+        let day = Self.dayString(start)
+        return AppleHealthImportPayload(
+            steps: [StepSample(date: day, count: Int(stepTotal.rounded(.down)))],
+            sleep: [],
+            heartRate: [],
+            workouts: [],
+            calories: [CalorieSample(date: day, calories: calorieTotal)],
+            bodyMetrics: []
+        )
+    }
+
+    private func fetchCumulativeQuantity(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        start: Date,
+        end: Date
+    ) async throws -> Double {
+        guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { return 0 }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: statistics?.sumQuantity()?.doubleValue(for: unit) ?? 0)
+            }
+            store.execute(query)
+        }
     }
 
     private func fetchDailySteps(start: Date, end: Date) async throws -> [StepSample] {
@@ -67,7 +177,7 @@ final class HealthKitManager: ObservableObject {
                 collection?.enumerateStatistics(from: start, to: end) { stats, _ in
                     let count = Int(stats.sumQuantity()?.doubleValue(for: .count()) ?? 0)
                     if count > 0 {
-                        rows.append(StepSample(date: Self.dayFormatter.string(from: stats.startDate), count: count))
+                        rows.append(StepSample(date: Self.dayString(stats.startDate), count: count))
                     }
                 }
                 continuation.resume(returning: rows)
@@ -91,8 +201,8 @@ final class HealthKitManager: ObservableObject {
                     .filter { $0.value == HKCategoryValueSleepAnalysis.asleepCore.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue }
                     .map {
                         SleepSample(
-                            start: Self.isoFormatter.string(from: $0.startDate),
-                            end: Self.isoFormatter.string(from: $0.endDate),
+                            start: Self.isoString($0.startDate),
+                            end: Self.isoString($0.endDate),
                             sleepHours: round($0.endDate.timeIntervalSince($0.startDate) / 36) / 100,
                             sleepScore: nil
                         )
@@ -118,7 +228,7 @@ final class HealthKitManager: ObservableObject {
                 let unit = HKUnit.count().unitDivided(by: .minute())
                 let rows = (samples as? [HKQuantitySample] ?? []).map {
                     HeartRateSample(
-                        sampledAt: Self.isoFormatter.string(from: $0.startDate),
+                        sampledAt: Self.isoString($0.startDate),
                         bpm: $0.quantity.doubleValue(for: unit),
                         context: "apple_health"
                     )
@@ -143,8 +253,8 @@ final class HealthKitManager: ObservableObject {
                 let rows = (samples as? [HKWorkout] ?? []).map {
                     WorkoutSample(
                         activityName: $0.workoutActivityType.displayName,
-                        start: Self.isoFormatter.string(from: $0.startDate),
-                        end: Self.isoFormatter.string(from: $0.endDate),
+                        start: Self.isoString($0.startDate),
+                        end: Self.isoString($0.endDate),
                         calories: $0.totalEnergyBurned?.doubleValue(for: .kilocalorie()),
                         averageHeartRate: nil
                     )
@@ -179,7 +289,7 @@ final class HealthKitManager: ObservableObject {
                 collection?.enumerateStatistics(from: start, to: end) { stats, _ in
                     let kcal = stats.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
                     if kcal > 0 {
-                        rows.append(CalorieSample(date: Self.dayFormatter.string(from: stats.startDate), calories: kcal))
+                        rows.append(CalorieSample(date: Self.dayString(stats.startDate), calories: kcal))
                     }
                 }
                 continuation.resume(returning: rows)
@@ -202,7 +312,7 @@ final class HealthKitManager: ObservableObject {
 
                 let rows = (samples as? [HKQuantitySample] ?? []).map {
                     BodyMetricSample(
-                        sampledAt: Self.isoFormatter.string(from: $0.startDate),
+                        sampledAt: Self.isoString($0.startDate),
                         type: "body_mass",
                         value: $0.quantity.doubleValue(for: .gramUnit(with: .kilo)),
                         unit: "kg"
@@ -214,19 +324,19 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    private static let isoFormatter: ISO8601DateFormatter = {
+    nonisolated private static func isoString(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 
-    private static let dayFormatter: DateFormatter = {
+    nonisolated private static func dayString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 }
 
 private extension HKWorkoutActivityType {

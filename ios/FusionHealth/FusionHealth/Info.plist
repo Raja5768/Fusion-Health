@@ -20,12 +20,27 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.local.fusionhealth.daily-refresh</string>
+	</array>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Fusion Health reads Apple Health data on this iPhone so it can upload normalized metrics to your self-hosted backend.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Fusion Health does not write Health data.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Fusion Health connects to the backend server you configure on your local network.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

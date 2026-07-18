@@ -18,6 +18,8 @@ X-API-Key: fh_...
 
 ## Run On iPhone
 
+Requires Xcode 15.3 or newer and an iPhone running iOS 17 or newer.
+
 1. Open `ios/FusionHealth/FusionHealth.xcodeproj` in Xcode on a Mac.
 2. Select the `FusionHealth` target.
 3. In **Signing & Capabilities**, choose your Apple developer team.
@@ -25,7 +27,21 @@ X-API-Key: fh_...
 5. Connect your iPhone.
 6. Build and run.
 
+For a simulator build from Terminal after installing Xcode:
+
+```bash
+xcodebuild \
+  -project ios/FusionHealth/FusionHealth.xcodeproj \
+  -scheme FusionHealth \
+  -sdk iphonesimulator \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
 ## Backend URL
+
+The repository includes a deployable FastAPI backend under `backend/` and a Render Blueprint at `render.yaml`. See `backend/README.md` for hosted deployment instructions.
 
 Do not use `localhost` from the iPhone. Use your Mac or server LAN address instead:
 
@@ -46,8 +62,8 @@ curl -X POST http://localhost:8000/api/v1/api-keys/generate \
   -d '{"name":"iPhone"}'
 ```
 
-Paste the returned `api_key` into the app. The backend stores only the hash.
+Paste the returned `api_key` into the app. The backend stores only the hash, and the iOS app stores the key in the device Keychain.
 
 ## Privacy
 
-HealthKit data is read on-device. The app uploads only to the backend URL you enter. Provider tokens are not used by the iOS app.
+HealthKit data is read on-device. The app uploads only to the backend URL you enter. Provider tokens are not used by the iOS app. Use HTTPS for hosted backends; plain HTTP should be limited to a trusted local network during development.

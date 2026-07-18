@@ -1,0 +1,13 @@
+# Xcode per-user workspace and scheme state
+xcuserdata/
+*.xcuserstate
+
+# Local build output
+DerivedData/
+build/
+
+# Python backend
+__pycache__/
+*.pyc
+*.db
+.venv/

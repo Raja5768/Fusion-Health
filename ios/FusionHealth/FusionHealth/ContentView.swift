@@ -1,74 +1,557 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
-    @AppStorage("backendURL") private var backendURL = "http://192.168.1.10:8000"
-    @AppStorage("apiKey") private var apiKey = ""
-    @AppStorage("syncDays") private var syncDays = 7
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("backendURL") private var backendURL = "https://fusion-health-api-qe6l.onrender.com"
+    @AppStorage("lastDailyActivityUpload") private var lastDailyUpload = ""
+    @AppStorage("lastDailyActivityUploadTime") private var lastDailyUploadTime = 0.0
+    @AppStorage("healthPermissionRequested") private var healthPermissionRequested = false
+    @AppStorage("selectedTab") private var selectedTab = 0
 
     @StateObject private var healthKit = HealthKitManager()
-    @State private var status = "Ready"
-    @State private var isSyncing = false
+    @State private var apiKey = KeychainStore.string(forKey: "apiKey")
+    @State private var status = "Displaying Apple Health data only"
+    @State private var statusKind = StatusKind.ready
+    @State private var isRefreshing = false
+    @State private var isUploadingYesterday = false
+    @State private var yesterdayUploadStatus: String?
+    @State private var isAuthorizing = false
     @State private var lastPayload: AppleHealthImportPayload?
+    @State private var yesterdayPayload: AppleHealthImportPayload?
+    @State private var todaySteps: Int?
+
+    private let fiveMinuteRefresh = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Fusion Health API") {
-                    TextField("Backend URL", text: $backendURL)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                    SecureField("API Key", text: $apiKey)
-                        .textInputAutocapitalization(.never)
-                    Stepper("Sync last \(syncDays) days", value: $syncDays, in: 1...30)
-                }
-
-                Section("HealthKit") {
-                    Button("Authorize Health Access") {
-                        Task { await authorize() }
-                    }
-                    Button("Sync Apple Health") {
-                        Task { await sync() }
-                    }
-                    .disabled(isSyncing || apiKey.isEmpty)
-                }
-
-                Section("Status") {
-                    Text(status)
-                    if let lastPayload {
-                        LabeledContent("Steps", value: "\(lastPayload.steps.count)")
-                        LabeledContent("Sleep", value: "\(lastPayload.sleep.count)")
-                        LabeledContent("Heart Rate", value: "\(lastPayload.heartRate.count)")
-                        LabeledContent("Workouts", value: "\(lastPayload.workouts.count)")
-                        LabeledContent("Calories", value: "\(lastPayload.calories.count)")
-                        LabeledContent("Body Metrics", value: "\(lastPayload.bodyMetrics.count)")
-                    }
-                }
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                SyncDashboard(
+                    lastPayload: lastPayload,
+                    todaySteps: todaySteps
+                )
             }
-            .navigationTitle("Fusion Health")
+            .tabItem { Label("Live", systemImage: "waveform.path.ecg") }
+            .tag(0)
+
+            NavigationStack {
+                YesterdayDashboard(
+                    payload: yesterdayPayload,
+                    isUploading: isUploadingYesterday,
+                    uploadStatus: yesterdayUploadStatus,
+                    syncAction: { Task { await syncYesterdayNow() } }
+                )
+            }
+            .tabItem { Label("Yesterday", systemImage: "clock.arrow.circlepath") }
+            .tag(3)
+
+            NavigationStack {
+                APISettingsView(
+                    backendURL: $backendURL,
+                    apiKey: $apiKey
+                )
+            }
+            .tabItem { Label("API", systemImage: "server.rack") }
+            .tag(1)
+
+            NavigationStack {
+                PermissionsView(
+                    permissionRequested: healthPermissionRequested,
+                    isAuthorizing: isAuthorizing,
+                    authorizeAction: { Task { await authorize() } }
+                )
+            }
+            .tabItem { Label("Permissions", systemImage: "lock.shield") }
+            .tag(2)
+        }
+        .tint(.teal)
+        .onChange(of: apiKey) { _, newValue in
+            KeychainStore.set(newValue, forKey: "apiKey")
+        }
+        .onReceive(healthKit.$healthDataChangeID.dropFirst()) { _ in
+            Task { await refreshHealthData() }
+        }
+        .onReceive(fiveMinuteRefresh) { _ in
+            Task { await refreshHealthData() }
+        }
+        .task {
+            await prepareHealthKit()
+            await DailyActivitySync.uploadYesterdayIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task { await prepareHealthKit() }
+            Task { await DailyActivitySync.uploadYesterdayIfNeeded() }
         }
     }
 
     private func authorize() async {
+        isAuthorizing = true
+        defer { isAuthorizing = false }
+
         do {
             try await healthKit.requestAuthorization()
-            status = "Health access authorized"
+            healthKit.startObservingHealthChanges()
+            healthPermissionRequested = true
+            status = "Health access request completed"
+            statusKind = .success
         } catch {
             status = error.localizedDescription
+            statusKind = .error
         }
     }
 
-    private func sync() async {
-        isSyncing = true
-        defer { isSyncing = false }
+    private func refreshHealthData() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
 
         do {
-            let payload = try await healthKit.exportPayload(days: syncDays)
-            let response = try await FusionHealthAPI(baseURL: backendURL, apiKey: apiKey).uploadAppleHealth(payload)
+            let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+            async let livePayload = healthKit.exportPayload(days: 2)
+            async let currentSteps = healthKit.fetchTodaySteps()
+            async let completedDay = healthKit.fetchDailyActivity(for: yesterday)
+            let (payload, steps, dailyPayload) = try await (livePayload, currentSteps, completedDay)
+            todaySteps = steps
             lastPayload = payload
-            status = "Uploaded to \(response.provider) at \(response.importedAt)"
+            yesterdayPayload = dailyPayload
+            status = payload.sampleCount > 0
+                ? "Updated display from Apple Health — nothing uploaded"
+                : "No Health data found. Review Health access in Permissions."
+            statusKind = payload.sampleCount > 0 ? .success : .warning
         } catch {
-            status = error.localizedDescription
+            status = "Live update failed: \(error.localizedDescription)"
+            statusKind = .error
         }
+    }
+
+    private func syncYesterdayNow() async {
+        guard !isUploadingYesterday else { return }
+        isUploadingYesterday = true
+        yesterdayUploadStatus = "Uploading yesterday's activity…"
+        defer { isUploadingYesterday = false }
+
+        let succeeded = await DailyActivitySync.uploadYesterdayIfNeeded(force: true)
+        if succeeded {
+            yesterdayUploadStatus = "Yesterday's steps and active calories were uploaded."
+            let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+            yesterdayPayload = try? await healthKit.fetchDailyActivity(for: yesterday)
+        } else {
+            yesterdayUploadStatus = "Upload failed. Check Health permissions and API settings."
+        }
+    }
+
+    private func prepareHealthKit() async {
+        guard !isRefreshing else { return }
+
+        do {
+            try await healthKit.requestAuthorization()
+            healthPermissionRequested = true
+            healthKit.startObservingHealthChanges()
+            await refreshHealthData()
+        } catch {
+            status = "HealthKit setup failed: \(error.localizedDescription)"
+            statusKind = .error
+        }
+    }
+}
+
+private struct YesterdayDashboard: View {
+    let payload: AppleHealthImportPayload?
+    let isUploading: Bool
+    let uploadStatus: String?
+    let syncAction: () -> Void
+
+    private var yesterday: Date {
+        Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Yesterday")
+                        .font(.largeTitle.bold())
+                    Text(yesterday.formatted(date: .complete, time: .omitted))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let payload {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("Daily Activity", systemImage: "calendar.badge.clock")
+                            .font(.headline)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            MetricTile(
+                                title: "Steps",
+                                value: payload.yesterdaySteps.formatted(),
+                                icon: "figure.walk",
+                                color: .blue
+                            )
+                            MetricTile(
+                                title: "Active Energy",
+                                value: "\(Int(payload.yesterdayCalories.rounded()).formatted()) kcal",
+                                icon: "flame.fill",
+                                color: .red
+                            )
+                        }
+                    }
+                    .cardStyle()
+
+                    Button(action: syncAction) {
+                        HStack {
+                            if isUploading {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "arrow.up.circle.fill")
+                            }
+                            Text(isUploading ? "Syncing yesterday…" : "Sync yesterday now")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                        .padding()
+                        .foregroundStyle(.white)
+                        .background(.teal, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .disabled(isUploading)
+
+                    if let uploadStatus {
+                        Text(uploadStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("Yesterday uploads automatically after midnight. Use the button only when you want to retry immediately.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ContentUnavailableView(
+                        "Loading Health Data",
+                        systemImage: "heart.text.clipboard",
+                        description: Text("Keep Fusion Health open briefly while it reads yesterday’s activity.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                    .cardStyle()
+                }
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SyncDashboard: View {
+    let lastPayload: AppleHealthImportPayload?
+    let todaySteps: Int?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                hero
+                metrics
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Fusion Health")
+    }
+
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Apple Health Live View")
+                        .font(.title2.bold())
+                    Text("Today's data stays on your iPhone and is never uploaded.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.82))
+                }
+                Spacer()
+                Image(systemName: "heart.text.clipboard")
+                    .font(.system(size: 34, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+            }
+
+            Label("Live view refreshes automatically", systemImage: "bolt.heart.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+        .foregroundStyle(.white)
+        .padding(22)
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.02, green: 0.42, blue: 0.46), .teal],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 24)
+        )
+        .shadow(color: .teal.opacity(0.2), radius: 18, y: 8)
+    }
+
+    @ViewBuilder
+    private var metrics: some View {
+        if let lastPayload {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Latest Health Data").font(.headline)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    MetricTile(title: "Steps Today", value: (todaySteps ?? lastPayload.todaySteps).formatted(), icon: "figure.walk", color: .blue)
+                    MetricTile(title: "Sleep", value: String(format: "%.1f h", lastPayload.totalSleepHours), icon: "moon.zzz.fill", color: .indigo)
+                    MetricTile(title: "Avg Heart Rate", value: lastPayload.averageHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "—", icon: "heart.fill", color: .pink)
+                    MetricTile(title: "Workouts", value: lastPayload.workouts.count.formatted(), icon: "figure.run", color: .orange)
+                    MetricTile(title: "Active Energy", value: "\(Int(lastPayload.todayCalories.rounded()).formatted()) kcal", icon: "flame.fill", color: .red)
+                    MetricTile(title: "Latest Weight", value: lastPayload.latestBodyMass.map { String(format: "%.1f kg", $0) } ?? "—", icon: "scalemass.fill", color: .green)
+                }
+            }
+        } else {
+            ContentUnavailableView(
+                "Loading live data",
+                systemImage: "chart.xyaxis.line",
+                description: Text("Apple Health data will appear here and remain on this iPhone.")
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 22)
+            .cardStyle()
+        }
+    }
+}
+
+private struct APISettingsView: View {
+    @Binding var backendURL: String
+    @Binding var apiKey: String
+    @State private var revealAPIKey = false
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Your API key is stored in this device's Keychain.", systemImage: "key.horizontal.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Server") {
+                TextField("https://health.example.com", text: $backendURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+
+                if backendURL.lowercased().hasPrefix("http://") {
+                    Label("Use HTTP only on a trusted local network.", systemImage: "exclamationmark.shield.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Authentication") {
+                HStack {
+                    Group {
+                        if revealAPIKey {
+                            TextField("fh_…", text: $apiKey)
+                        } else {
+                            SecureField("fh_…", text: $apiKey)
+                        }
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.password)
+
+                    Button {
+                        revealAPIKey.toggle()
+                    } label: {
+                        Image(systemName: revealAPIKey ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(revealAPIKey ? "Hide API key" : "Show API key")
+                }
+            }
+
+            Section("Documentation") {
+                NavigationLink {
+                    APIDocumentationView()
+                } label: {
+                    Label("Fusion Health API Reference", systemImage: "doc.text.magnifyingglass")
+                }
+            }
+
+            Section("Automatic Upload") {
+                Label("Only yesterday's steps and active calories are uploaded after midnight.", systemImage: "calendar.badge.clock")
+                Text("Live data is display-only. PostgreSQL stores one compact row per calendar day.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("API Settings")
+    }
+}
+
+private struct APIDocumentationView: View {
+    private let documentURL = Bundle.main.url(forResource: "API_DOCUMENTATION", withExtension: "md")
+
+    var body: some View {
+        ScrollView {
+            if let attributedDocument {
+                Text(attributedDocument)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding()
+            } else {
+                ContentUnavailableView(
+                    "Documentation unavailable",
+                    systemImage: "doc.badge.ellipsis",
+                    description: Text("The bundled API reference could not be loaded.")
+                )
+                .padding(.top, 80)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("API Reference")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let documentURL {
+                ShareLink(item: documentURL) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Share API documentation")
+            }
+        }
+    }
+
+    private var attributedDocument: AttributedString? {
+        guard let documentURL,
+              let markdown = try? String(contentsOf: documentURL, encoding: .utf8) else {
+            return nil
+        }
+        return try? AttributedString(
+            markdown: markdown,
+            options: .init(interpretedSyntax: .full)
+        )
+    }
+}
+
+private struct PermissionsView: View {
+    @Environment(\.openURL) private var openURL
+    let permissionRequested: Bool
+    let isAuthorizing: Bool
+    let authorizeAction: () -> Void
+
+    private let permissions: [(String, String, Color)] = [
+        ("Steps & Activity", "figure.walk", .blue),
+        ("Heart Rate", "heart.fill", .pink),
+        ("Sleep", "moon.zzz.fill", .indigo),
+        ("Workouts", "figure.run", .orange),
+        ("Active Energy", "flame.fill", .red),
+        ("Body Mass", "scalemass.fill", .green)
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                VStack(spacing: 14) {
+                    Image(systemName: permissionRequested ? "checkmark.shield.fill" : "heart.text.clipboard")
+                        .font(.system(size: 48))
+                        .foregroundStyle(permissionRequested ? .green : .teal)
+                    Text(permissionRequested ? "Health access requested" : "Connect Apple Health")
+                        .font(.title3.bold())
+                    Text("Fusion Health reads only the categories below and never writes to Apple Health.")
+                        .multilineTextAlignment(.center)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Button(action: authorizeAction) {
+                        HStack {
+                            if isAuthorizing { ProgressView() }
+                            Text(permissionRequested ? "Review Health Access" : "Allow Health Access")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isAuthorizing)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+            }
+
+            Section("Data requested") {
+                ForEach(permissions, id: \.0) { permission in
+                    Label {
+                        Text(permission.0)
+                    } icon: {
+                        Image(systemName: permission.1)
+                            .foregroundStyle(permission.2)
+                    }
+                }
+            }
+
+            Section("Privacy") {
+                Label("Data is read on-device", systemImage: "iphone.and.arrow.forward")
+                Label("Uploads go only to your configured server", systemImage: "lock.icloud.fill")
+                Button("Open System Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        openURL(url)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Permissions")
+    }
+}
+
+private struct MetricTile: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .frame(width: 34, height: 34)
+                .foregroundStyle(color)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value).font(.headline)
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private enum StatusKind {
+    case ready, working, success, warning, error
+
+    var icon: String {
+        switch self {
+        case .ready: "circle.dotted"
+        case .working: "arrow.triangle.2.circlepath"
+        case .success: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .ready: .secondary
+        case .working: .teal
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+}
+
+private extension View {
+    func cardStyle() -> some View {
+        padding(18)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 

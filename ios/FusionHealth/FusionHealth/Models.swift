@@ -7,6 +7,77 @@ struct AppleHealthImportPayload: Codable {
     var workouts: [WorkoutSample]
     var calories: [CalorieSample]
     var bodyMetrics: [BodyMetricSample]
+
+    var sampleCount: Int {
+        steps.count + sleep.count + heartRate.count + workouts.count + calories.count + bodyMetrics.count
+    }
+
+    var totalSteps: Int {
+        steps.reduce(0) { $0 + $1.count }
+    }
+
+    var todaySteps: Int {
+        steps(on: Date())
+    }
+
+    var yesterdaySteps: Int {
+        steps(on: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+    }
+
+    var todayCalories: Double {
+        calories(on: Date())
+    }
+
+    var yesterdayCalories: Double {
+        calories(on: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+    }
+
+    var totalSleepHours: Double {
+        sleep.reduce(0) { $0 + $1.sleepHours }
+    }
+
+    var averageHeartRate: Double? {
+        guard !heartRate.isEmpty else { return nil }
+        return heartRate.reduce(0) { $0 + $1.bpm } / Double(heartRate.count)
+    }
+
+    var totalCalories: Double {
+        calories.reduce(0) { $0 + $1.calories }
+    }
+
+    var latestBodyMass: Double? {
+        bodyMetrics.first(where: { $0.type == "body_mass" })?.value
+    }
+
+    func activityOnly(for date: Date) -> AppleHealthImportPayload {
+        let day = Self.dayString(date)
+        return AppleHealthImportPayload(
+            steps: steps.filter { $0.date == day },
+            sleep: [],
+            heartRate: [],
+            workouts: [],
+            calories: calories.filter { $0.date == day },
+            bodyMetrics: []
+        )
+    }
+
+    private func steps(on date: Date) -> Int {
+        let day = Self.dayString(date)
+        return steps.filter { $0.date == day }.reduce(0) { $0 + $1.count }
+    }
+
+    private func calories(on date: Date) -> Double {
+        let day = Self.dayString(date)
+        return calories.filter { $0.date == day }.reduce(0) { $0 + $1.calories }
+    }
+
+    private static func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 }
 
 struct StepSample: Codable {
@@ -56,6 +127,7 @@ struct AppleHealthImportResponse: Decodable {
 enum FusionHealthError: LocalizedError {
     case healthKitUnavailable
     case invalidBackendURL
+    case invalidAPIKey
     case invalidResponse
     case apiError(String)
 
@@ -64,7 +136,9 @@ enum FusionHealthError: LocalizedError {
         case .healthKitUnavailable:
             return "HealthKit is unavailable on this device."
         case .invalidBackendURL:
-            return "The backend URL is invalid."
+            return "The backend URL is invalid. Enter a complete HTTP or HTTPS URL."
+        case .invalidAPIKey:
+            return "Enter a valid Fusion Health API key."
         case .invalidResponse:
             return "Fusion Health returned an invalid response."
         case .apiError(let message):
