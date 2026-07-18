@@ -26,11 +26,6 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             NavigationStack {
                 SyncDashboard(
-                    status: status,
-                    statusKind: statusKind,
-                    isRefreshing: isRefreshing,
-                    lastDailyUpload: lastDailyUpload,
-                    lastDailyUploadTime: lastDailyUploadTime,
                     lastPayload: lastPayload,
                     todaySteps: todaySteps
                 )
@@ -240,11 +235,6 @@ private struct YesterdayDashboard: View {
 }
 
 private struct SyncDashboard: View {
-    let status: String
-    let statusKind: StatusKind
-    let isRefreshing: Bool
-    let lastDailyUpload: String
-    let lastDailyUploadTime: Double
     let lastPayload: AppleHealthImportPayload?
     let todaySteps: Int?
 
@@ -252,7 +242,6 @@ private struct SyncDashboard: View {
         ScrollView {
             VStack(spacing: 20) {
                 hero
-                statusCard
                 metrics
             }
             .padding()
@@ -292,33 +281,6 @@ private struct SyncDashboard: View {
             in: RoundedRectangle(cornerRadius: 24)
         )
         .shadow(color: .teal.opacity(0.2), radius: 18, y: 8)
-    }
-
-    private var statusCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Automatic Daily Upload", systemImage: "calendar.badge.checkmark")
-                .font(.headline)
-            HStack(spacing: 12) {
-                Image(systemName: statusKind.icon)
-                    .font(.title2)
-                    .foregroundStyle(statusKind.color)
-                    .symbolEffect(.pulse, isActive: isRefreshing)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(status).fontWeight(.semibold)
-                    if lastDailyUploadTime > 0 {
-                        Text("\(lastDailyUpload) uploaded \(Date(timeIntervalSince1970: lastDailyUploadTime), style: .relative)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Yesterday uploads automatically after midnight when API settings are complete")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-            }
-        }
-        .cardStyle()
     }
 
     @ViewBuilder
